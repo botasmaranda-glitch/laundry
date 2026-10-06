@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Laundry room</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧺</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#e9eef2;--card:#fff;--ink:#14212b;--mute:#5d6e7b;--line:#d3dce3;--free:#1f9d6b;--busy:#2557d6;--done:#d9822b;--glass:#dbe6ee}
+@media (prefers-color-scheme:dark){:root{--bg:#10171d;--card:#18222b;--ink:#eaf1f6;--mute:#8fa1ae;--line:#2a3743;--free:#3cc58d;--busy:#6c92ff;--done:#f0a050;--glass:#223340}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:"Bricolage Grotesque",system-ui,sans-serif;padding:max(20px,env(safe-area-inset-top)) 16px 40px;min-height:100vh}
+main{max-width:860px;margin:0 auto}
+h1{font-size:clamp(2rem,6vw,3rem);font-weight:800;letter-spacing:-.03em;margin:8px 0 4px}
+.sub{color:var(--mute);margin:0 0 24px}
+.grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:22px;padding:22px;display:flex;flex-direction:column;align-items:center;gap:14px}
+.card h2{margin:0;font-size:1.3rem;align-self:flex-start}
+.door{position:relative;width:210px;height:210px}
+.door svg{width:100%;height:100%;transform:rotate(-90deg)}
+.door .glass{fill:var(--glass)}
+.door .track{fill:none;stroke:var(--line);stroke-width:10}
+.door .bar{fill:none;stroke:var(--free);stroke-width:10;stroke-linecap:round;transition:stroke-dashoffset .6s,stroke .3s}
+.busy .bar{stroke:var(--busy)}.done .bar{stroke:var(--done)}
+.door .mid{position:absolute;inset:0;display:grid;place-content:center;text-align:center}
+.time{font-size:2.4rem;font-weight:800;letter-spacing:-.03em;font-variant-numeric:tabular-nums;line-height:1}
+.state{font-size:.95rem;color:var(--mute);margin-top:4px}
+.free .time{color:var(--free)}.busy .time{color:var(--busy)}.done .time{color:var(--done)}
+.info{text-align:center;min-height:2.6em;color:var(--mute);font-size:.95rem}
+.info b{color:var(--ink)}
+.form{display:grid;gap:8px;width:100%}
+label{font-size:.85rem;color:var(--mute)}
+select,input{width:100%;font:inherit;padding:11px 12px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+button{font:inherit;font-weight:600;padding:12px 16px;border:0;border-radius:12px;cursor:pointer;background:var(--ink);color:var(--card);width:100%}
+button.alt{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.row{display:flex;gap:8px;width:100%}
+:focus-visible{outline:3px solid var(--busy);outline-offset:2px}
+.note{margin-top:20px;font-size:.85rem;color:var(--mute);text-align:center}
+@media (prefers-reduced-motion:reduce){.door .bar{transition:none}}
+</style>
+</head>
+<body>
+<main>
+  <h1>Laundry room</h1>
+  <p class="sub">Check if the washer and dryer are free before you head down.</p>
+  <div class="grid" id="grid"></div>
+  <p class="note" id="note"></p>
+</main>
+<script>
+// Standard European cycle lengths (minutes)
+const CYCLES = {
+  washer: [
+    ["Quick wash 30°C", 30], ["Delicates 30°C", 60], ["Synthetics 40°C", 90],
+    ["Cotton 40°C", 120], ["Cotton 60°C", 135], ["Eco 40–60°C", 210]
+  ],
+  dryer: [
+    ["Quick dry", 30], ["Delicates", 45], ["Synthetics", 60],
+    ["Iron dry (cotton)", 105], ["Cupboard dry (cotton)", 135], ["Extra dry (towels)", 165]
+  ]
+};
+const NAMES = { washer: "Washing machine", dryer: "Dryer" };
+const R = 90, C = 2 * Math.PI * R;
+let state = { washer: null, dryer: null }, shared = true, formOpen = {};
+
+const $ = s => document.querySelector(s);
+const fmt = ms => {
+  const m = Math.max(0, Math.ceil(ms / 60000)), h = Math.floor(m / 60);
+  return h ? `${h}:${String(m % 60).padStart(2, "0")}` : `${m} min`;
+};
+const clock = t => new Date(t).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+
+async function load() {
+  try {
+    const r = await fetch("/api/state");
+    if (!r.ok) throw 0;
+    state = await r.json(); shared = true;
+  } catch {
+    shared = false;
+    try { state = JSON.parse(localStorage.getItem("laundry")) || state; } catch {}
+  }
+}
+async function save(machine, data) {
+  state[machine] = data;
+  try { localStorage.setItem("laundry", JSON.stringify(state)); } catch {}
+  if (shared) {
+    try {
+      const r = await fetch("/api/state", { method: "POST", body: JSON.stringify({ machine, data }) });
+      if (r.ok) state = await r.json();
+    } catch {}
+  }
+  render();
+}
+
+function render() {
+  const now = Date.now();
+  $("#grid").innerHTML = ["washer", "dryer"].map(m => {
+    const s = state[m];
+    const running = s && s.end > now, finished = s && !running;
+    const cls = running ? "busy" : finished ? "done" : "free";
+    const frac = running ? (now - s.start) / (s.end - s.start) : finished ? 1 : 0;
+    const big = running ? fmt(s.end - now) : finished ? "Done" : "Free";
+    const small = running ? "left" : finished ? "unload me" : "ready to use";
+    const info = running
+      ? `<b>${esc(s.name)}</b> is running ${esc(s.cycle)}<br>Finishes at ${clock(s.end)}`
+      : finished ? `<b>${esc(s.name)}</b> finished at ${clock(s.end)}<br>Clothes may still be inside` : "Nobody is using it right now";
+    let controls;
+    if (running) {
+      controls = `<div class="row"><button class="alt" onclick="extend('${m}')">+10 min</button><button onclick="stop('${m}')">Finished / free it</button></div>`;
+    } else if (finished) {
+      controls = `<button onclick="stop('${m}')">I've emptied it</button>`;
+    } else {
+      controls = `<div class="form">
+        <label for="n-${m}">Your name</label><input id="n-${m}" maxlength="30" value="${esc(localStorage.getItem("laundry-name") || "")}" autocomplete="given-name">
+        <label for="c-${m}">Programme</label>
+        <select id="c-${m}">${CYCLES[m].map(([n, t], i) => `<option value="${i}">${n} · ${Math.floor(t/60) ? Math.floor(t/60)+" h " : ""}${t%60 ? t%60+" min" : ""}</option>`).join("")}</select>
+        <button onclick="start('${m}')">Start ${m === "washer" ? "wash" : "drying"}</button></div>`;
+    }
+    return `<section class="card ${cls}"><h2>${NAMES[m]}</h2>
+      <div class="door"><svg viewBox="0 0 220 220"><circle class="glass" cx="110" cy="110" r="100"/><circle class="track" cx="110" cy="110" r="${R}"/>
+      <circle class="bar" cx="110" cy="110" r="${R}" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - frac)}"/></svg>
+      <div class="mid"><div class="time">${big}</div><div class="state">${small}</div></div></div>
+      <div class="info">${info}</div>${controls}</section>`;
+  }).join("");
+  $("#note").textContent = shared ? "Live — updates for everyone in the flat." : "Preview mode: status is only saved on this device until the site is deployed with its function.";
+}
+
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+window.start = m => {
+  const name = $("#n-" + m).value.trim() || "Someone";
+  const [cycle, mins] = CYCLES[m][$("#c-" + m).value];
+  try { localStorage.setItem("laundry-name", name); } catch {}
+  const t = Date.now();
+  save(m, { name, cycle, start: t, end: t + mins * 60000 });
+};
+window.stop = m => save(m, null);
+window.extend = m => { const s = state[m]; save(m, { ...s, end: s.end + 10 * 60000 }); };
+
+load().then(render);
+setInterval(render, 15000);
+setInterval(async () => { if (!document.hidden && !document.activeElement.matches("input,select")) { await load(); render(); } }, 10000);
+</script>
+</body>
+</html>
