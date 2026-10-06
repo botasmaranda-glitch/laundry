@@ -4,7 +4,7 @@ import { getStore } from "@netlify/blobs";
 export const config = { path: "/api/state" };
 
 export default async (req) => {
-  const store = getStore("laundry");
+  const store = getStore({ name: "laundry", consistency: "strong" });
   const state = (await store.get("state", { type: "json" })) || { washer: null, dryer: null };
 
   if (req.method === "POST") {
